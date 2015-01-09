@@ -10,6 +10,7 @@ module Control.Concurrent.STM.Notify (
 )where
 
 import           Control.Concurrent.STM
+import           Control.Concurrent
 
 import           Control.Applicative
 import           Control.Concurrent.Async
@@ -78,7 +79,7 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
          -> IO ()
 onChange (STMEnvelope n v) f = forever $ do
   v' <- atomically $ do
-    n' <- n >> retry
+    n' <- n
     case n' of
       Nothing -> retry
       Just _ -> v
