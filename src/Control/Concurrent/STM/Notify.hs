@@ -74,20 +74,21 @@ send (Address sendF) = sendF
 -- can watch the envelope. This never ends
 forkOnChange :: STMEnvelope a -- ^ Envelope to watch
              -> (a -> IO b)  -- ^ Action to perform
-             -> IO (Async b) -- ^ Resulting async value so that you can cancel
+             -> IO (Async ()) -- ^ Resulting async value so that you can cancel
 forkOnChange v f = async $ onChange v f
 
--- | Watch the envelope for changes
+-- | Watch the envelope for changes. This never ends
 onChange :: STMEnvelope a -- ^ Envelope to watch
          -> (a -> IO b)  -- ^ Action to perform
-         -> IO b
-onChange (STMEnvelope n v) f = do
+         -> IO ()
+onChange (STMEnvelope n v) f = forever $ do
   v' <- atomically $ do
     n' <- n
     case n' of
       Nothing -> retry
       Just _ -> v
   f v'
+  return ()
 
 -- | fold across a value each time the envelope is updated
 foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
@@ -102,4 +103,3 @@ foldOnChange e@(STMEnvelope n v) fld i = do
       Just _ -> v
   i' <- fld i v'
   foldOnChange e fld i'
-

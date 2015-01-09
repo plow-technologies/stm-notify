@@ -2,7 +2,7 @@
 
 A structure for updating and watching values.
 
-Watching a value can ONLY occur in a single thread.
+Watching a value can ONLY occur in a single thread and you0 0are NOT GARUNTEED TO GET EVERY VALUE. At all. If the program runs faster than the watching thread can be woken up then you won't get the next updates if they occur while it's updating.
 
 ## Installation
 

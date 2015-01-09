@@ -28,6 +28,8 @@ Test-Suite spec
   Main-Is:              Spec.hs
   Build-Depends:        base
                       , hspec
+                      , stm
+                      , async
 
 Source-Repository head
   Type:                 git
