@@ -7,6 +7,7 @@ module Control.Concurrent.STM.Notify (
   , send
   , forkOnChange
   , onChange
+  , foldOnChange
 )where
 
 import           Control.Concurrent.STM
@@ -72,18 +73,33 @@ send (Address sendF) = sendF
 -- | Watch the envelope in a thread. This is the only thread that
 -- can watch the envelope. This never ends
 forkOnChange :: STMEnvelope a -- ^ Envelope to watch
-             -> (a -> IO ())  -- ^ Action to perform
-             -> IO (Async ()) -- ^ Resulting async value so that you can cancel
+             -> (a -> IO b)  -- ^ Action to perform
+             -> IO (Async b) -- ^ Resulting async value so that you can cancel
 forkOnChange v f = async $ onChange v f
 
--- | Watch the envelope for changes. This blocks forever
+-- | Watch the envelope for changes
 onChange :: STMEnvelope a -- ^ Envelope to watch
-         -> (a -> IO ())  -- ^ Action to perform
-         -> IO ()
-onChange (STMEnvelope n v) f = forever $ do
+         -> (a -> IO b)  -- ^ Action to perform
+         -> IO b
+onChange (STMEnvelope n v) f = do
   v' <- atomically $ do
     n' <- n
     case n' of
       Nothing -> retry
       Just _ -> v
   f v'
+
+-- | fold across a value each time the envelope is updated
+foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
+             -> (b -> a -> IO b)  -- ^ fold like function
+             -> b                 -- ^ Initial value
+             -> IO ()
+foldOnChange e@(STMEnvelope n v) fld i = do
+  v' <- atomically $ do
+    n' <- n
+    case n' of
+      Nothing -> retry
+      Just _ -> v
+  i' <- fld i v'
+  foldOnChange e fld i'
+
