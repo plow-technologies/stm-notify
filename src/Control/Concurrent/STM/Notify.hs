@@ -1,5 +1,7 @@
 module Control.Concurrent.STM.Notify (
-    spawnIO
+    STMEnvelope
+  , Address
+  , spawnIO
   , spawn
   , recvIO
   , recv
