@@ -2,6 +2,8 @@ module Control.Concurrent.STM.NotifySpec (main, spec) where
 
 import Test.Hspec
 
+import Control.Concurrent.STM.Notify
+
 main :: IO ()
 main = hspec spec
 
