@@ -89,7 +89,7 @@ onChange (STMEnvelope n v) f = forever $ do
     case n' of
       Nothing -> retry
       Just _ -> v
-  f v'
+  _ <- f v'
   return ()
 
 -- | fold across a value each time the envelope is updated
