@@ -22,7 +22,7 @@ import           Data.Monoid
 
 data STMEnvelope a = STMEnvelope {
   _stmEnvelopeTMvar :: STM (Maybe ()) -- ^ Action to read and wait for the current status
-, stmEnvelopeVal   :: STM a           -- ^ Actualy value of the 
+, stmEnvelopeVal    :: STM a           -- ^ Actualy value of the 
 }
 
 newtype Address a = Address { _unAddress :: a -> STM Bool }
@@ -32,14 +32,14 @@ instance Functor STMEnvelope where
 
 instance Applicative STMEnvelope where
   pure r = STMEnvelope (return $ Just ()) (return r)
-  (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope ((<>) <$> n  <*> n2) (f <*> x)  
+  (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)  
 
 instance Monad STMEnvelope where
   return r = STMEnvelope (return $ Just ()) (return r)
   (STMEnvelope _ v) >>= f = STMEnvelope (return $ Just ()) $ join $ (stmEnvelopeVal <$> f) <$> v
 
 instance (Monoid a) => Monoid (STMEnvelope a) where
-  mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope ((<>) <$> n1 <*> n2) ((<>) <$> v1 <*> v2)
+  mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
   mempty = STMEnvelope (return $ Just ()) (return mempty)
 
 -- | Spawn a new mailbox and an address to send new data to
