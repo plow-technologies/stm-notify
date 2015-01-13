@@ -31,16 +31,16 @@ instance Functor STMEnvelope where
   fmap f (STMEnvelope n v) = STMEnvelope n (f <$> v)
 
 instance Applicative STMEnvelope where
-  pure r = STMEnvelope (return $ Just ()) (return r)
+  pure r = STMEnvelope (return Nothing) (return r)
   (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)  
 
 instance Monad STMEnvelope where
-  return r = STMEnvelope (return $ Just ()) (return r)
-  (STMEnvelope _ v) >>= f = STMEnvelope (return $ Just ()) $ join $ (stmEnvelopeVal <$> f) <$> v
+  return r = STMEnvelope (return Nothing) (return r)
+  (STMEnvelope n v) >>= f = STMEnvelope (n) $ join $ (stmEnvelopeVal <$> f) <$> v
 
 instance (Monoid a) => Monoid (STMEnvelope a) where
   mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
-  mempty = STMEnvelope (return $ Just ()) (return mempty)
+  mempty = STMEnvelope (return Nothing) (return mempty)
 
 -- | Spawn a new mailbox and an address to send new data to
 spawnIO :: a -> IO (STMEnvelope a, Address a)
