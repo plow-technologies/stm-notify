@@ -21,7 +21,7 @@ import           Data.Monoid
 
 
 data STMEnvelope a = STMEnvelope {
-  _stmEnvelopeTMvar :: STM (Maybe ()) -- ^ Action to read and wait for the current status
+  _stmEnvelopeTMvar :: STM () -- ^ Action to read and wait for the current status
 , stmEnvelopeVal    :: STM a           -- ^ Actualy value of the 
 }
 
@@ -31,16 +31,16 @@ instance Functor STMEnvelope where
   fmap f (STMEnvelope n v) = STMEnvelope n (f <$> v)
 
 instance Applicative STMEnvelope where
-  pure r = STMEnvelope (return Nothing) (return r)
+  pure r = STMEnvelope empty (return r)
   (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)  
 
 instance Monad STMEnvelope where
-  return r = STMEnvelope (return Nothing) (return r)
+  return r = STMEnvelope empty (return r)
   (STMEnvelope n v) >>= f = STMEnvelope (n) $ join $ (stmEnvelopeVal <$> f) <$> v
 
 instance (Monoid a) => Monoid (STMEnvelope a) where
   mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
-  mempty = STMEnvelope (return Nothing) (return mempty)
+  mempty = STMEnvelope empty (return mempty)
 
 -- | Spawn a new mailbox and an address to send new data to
 spawnIO :: a -> IO (STMEnvelope a, Address a)
@@ -52,7 +52,7 @@ spawn :: a -> STM (STMEnvelope a, Address a)
 spawn v = do
   t <- newTVar v
   n <- newTMVar ()
-  return (STMEnvelope (tryTakeTMVar n) (readTVar t), Address (\a -> writeTVar t a >> tryPutTMVar n ()))
+  return (STMEnvelope (takeTMVar n) (readTVar t), Address (\a -> writeTVar t a >> tryPutTMVar n ()))
 
 -- | Read the current contents of a mailbox
 recvIO :: STMEnvelope a -> IO a
@@ -85,10 +85,8 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
          -> IO ()
 onChange (STMEnvelope n v) f = forever $ do
   v' <- atomically $ do
-    n' <- n
-    case n' of
-      Nothing -> retry
-      Just _ -> v
+    _ <- n
+    v
   _ <- f v'
   return ()
 
@@ -99,9 +97,7 @@ foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> IO ()
 foldOnChange e@(STMEnvelope n v) fld i = do
   v' <- atomically $ do
-    n' <- n
-    case n' of
-      Nothing -> retry
-      Just _ -> v
+    _ <- n
+    v
   i' <- fld i v'
   foldOnChange e fld i'
