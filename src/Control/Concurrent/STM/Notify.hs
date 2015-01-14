@@ -84,9 +84,7 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
          -> (a -> IO b)  -- ^ Action to perform
          -> IO ()
 onChange (STMEnvelope n v) f = forever $ do
-  v' <- atomically $ do
-    _ <- n
-    v
+  v' <- atomically $ n >> v -- wiat for the lock and then read the value
   _ <- f v'
   return ()
 
@@ -96,8 +94,6 @@ foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> b                 -- ^ Initial value
              -> IO ()
 foldOnChange e@(STMEnvelope n v) fld i = do
-  v' <- atomically $ do
-    _ <- n
-    v
+  v' <- atomically $ n >> v -- wait for the lock and then read the value
   i' <- fld i v'
   foldOnChange e fld i'
