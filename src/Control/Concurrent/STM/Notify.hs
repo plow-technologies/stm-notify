@@ -42,32 +42,32 @@ instance (Monoid a) => Monoid (STMEnvelope a) where
   mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
   mempty = STMEnvelope empty (return mempty)
 
--- | Spawn a new mailbox and an address to send new data to
+-- | Spawn a new envelope and an address to send new data to
 spawnIO :: a -> IO (STMEnvelope a, Address a)
 spawnIO = atomically . spawn
 
 
--- | Spawn a new mailbox and an address to send new data to
+-- | Spawn a new envelope and an address to send new data to
 spawn :: a -> STM (STMEnvelope a, Address a)
 spawn v = do
   t <- newTVar v
   n <- newTMVar ()
   return (STMEnvelope (takeTMVar n) (readTVar t), Address (\a -> writeTVar t a >> tryPutTMVar n ()))
 
--- | Read the current contents of a mailbox
+-- | Read the current contents of a envelope
 recvIO :: STMEnvelope a -> IO a
 recvIO = atomically . stmEnvelopeVal
 
--- | Read the current contents of a mailbox
+-- | Read the current contents of a envelope
 recv :: STMEnvelope a -> STM a
 recv = stmEnvelopeVal
 
--- | Update the contents of a mailbox for a specific address
+-- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
 sendIO :: Address a -> a -> IO Bool
 sendIO m v = atomically $ send m v
 
--- | Update the contents of a mailbox for a specific address
+-- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
 send :: Address a -> a -> STM Bool
 send (Address sendF) = sendF
