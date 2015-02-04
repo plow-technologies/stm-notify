@@ -25,12 +25,13 @@ specModifyingValue = do
       (env, addr) <- spawnIO 0
       (listEnv, listAddr) <- spawnIO []
       forkOnChange env (\i -> do
+        putStrLn "Hello"
         atomically $ do
           xs <- recv listEnv
           send listAddr (xs ++ [i]))
-      threadDelay 100
+      threadDelay 1000000
       mapM (sendIO addr) [1..100000]
-      threadDelay 1000
+      threadDelay 1000000
       xs <- recvIO listEnv
       length xs `shouldSatisfy` (> 10000)
 
