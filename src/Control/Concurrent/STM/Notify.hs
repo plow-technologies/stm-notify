@@ -18,15 +18,29 @@ import           Control.Applicative
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Data.Monoid
+import Data.Maybe
 
 
 data STMEnvelope a = STMEnvelope {
-  _stmEnvelopeTMvar :: STM (TMVar ())    -- ^ Action to read and wait for the current status
+  _stmEnvelopeTMvar :: [STM (TMVar ())]    -- ^ Action to read and wait for the current status
 , stmEnvelopeVal    :: STM a           -- ^ Actualy value of the 
 }
 
 
+
 newtype Address a = Address { _unAddress :: a -> STM Bool }
+
+
+readOne :: [STM a] -> STM a
+readOne xs = do
+  let xs' = map alwaysRead xs
+  processed <- catMaybes <$> sequence xs'
+  if length processed > 0
+    then return $ head processed
+    else retry
+
+alwaysRead :: STM a -> STM (Maybe a)
+alwaysRead x =  (Just <$> x) <|> return Nothing
 
 instance Functor STMEnvelope where
   fmap f (STMEnvelope n v) = STMEnvelope n (f <$> v)
@@ -37,7 +51,7 @@ instance Applicative STMEnvelope where
 
 instance Monad STMEnvelope where
   return r = STMEnvelope empty (return r)
-  (STMEnvelope n v) >>= f = STMEnvelope (n) $ join $ (stmEnvelopeVal <$> f) <$> v
+  (STMEnvelope n v) >>= f = STMEnvelope n $ join $ (stmEnvelopeVal <$> f) <$> v
 
 instance (Monoid a) => Monoid (STMEnvelope a) where
   mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
@@ -62,7 +76,7 @@ spawn val = do
   innerSignal <- newEmptyTMVar :: STM (TMVar ())
   tmSignal <- newTVar innerSignal :: STM (TVar (TMVar ()))
   let signalContainer = readTVar tmSignal
-      envelope = STMEnvelope signalContainer (readTVar tValue)
+      envelope = STMEnvelope [signalContainer] (readTVar tValue)
       address = Address $ \a -> do
         oldSignal <- signalContainer    -- Old place to notify of changes
         newInnerSignal <- newEmptyTMVar -- new method of signalling
@@ -102,24 +116,24 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
          -> (a -> IO b)  -- ^ Action to perform
          -> IO ()
 onChange env@(STMEnvelope _ valueContainer) f = forever $ do
-  _ <- atomically $ waitForChange env
-  print 1
+  _ <- waitForChange env
   value <- atomically $ valueContainer
   _ <- f value
   return ()
 
 
-waitForChange :: STMEnvelope a -> STM ()
+waitForChange :: STMEnvelope a -> IO ()
 waitForChange (STMEnvelope notifyContainer _) = do
-  notifyTMVar <- notifyContainer
-  readTMVar notifyTMVar
+  notifyTMVars <- atomically $ sequence notifyContainer  :: IO [TMVar ()]
+  atomically $ readOne (readTMVar <$> notifyTMVars)
 
 -- | fold across a value each time the envelope is updated
 foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> (b -> a -> IO b)  -- ^ fold like function
              -> b                 -- ^ Initial value
              -> IO ()
-foldOnChange e@(STMEnvelope n v) fld i = do
-  v' <- atomically $ (readTMVar =<< n) >> v -- wait for the lock and then read the value
+foldOnChange e@(STMEnvelope _ v) fld i = do
+  _ <- waitForChange e
+  v' <- atomically v -- wait for the lock and then read the value
   i' <- fld i v'
   foldOnChange e fld i'
