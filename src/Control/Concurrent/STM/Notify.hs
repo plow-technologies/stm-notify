@@ -21,6 +21,8 @@ import           Data.Monoid
 import Data.Maybe
 
 
+type STMMailbox a = (STMEnvelope a, Address a)
+
 data STMEnvelope a = STMEnvelope {
   _stmEnvelopeTMvar :: [STM (TMVar ())]    -- ^ Action to read and wait for the current status
 , stmEnvelopeVal    :: STM a           -- ^ Actualy value of the 
