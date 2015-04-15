@@ -1,3 +1,4 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 module Control.Concurrent.STM.Notify (
     STMEnvelope
   , Address
@@ -10,16 +11,18 @@ module Control.Concurrent.STM.Notify (
   , forkOnChange
   , onChange
   , foldOnChange
+  , STMMailbox
 )where
 
+import Prelude hiding (sequence)
 import           Control.Concurrent.STM
 
 import           Control.Applicative
 import           Control.Concurrent.Async
-import           Control.Monad
+import           Control.Monad hiding (sequence)
 import           Data.Monoid
 import Data.Maybe
-
+import Data.Traversable
 
 type STMMailbox a = (STMEnvelope a, Address a)
 
@@ -30,7 +33,7 @@ data STMEnvelope a = STMEnvelope {
 
 
 
-newtype Address a = Address { _unAddress :: a -> STM Bool }
+newtype Address a = Address { _unAddress :: a -> STM (Bool, TMVar ()) }
 
 
 readOne :: [STM a] -> STM a
@@ -83,9 +86,9 @@ spawn val = do
         oldSignal <- signalContainer    -- Old place to notify of changes
         newInnerSignal <- newEmptyTMVar -- new method of signalling
         writeTVar tValue a
+        writeTVar tmSignal newInnerSignal     -- Put the new signal in the container (done before notifying so that the new process can get the current signal)
         res <- tryPutTMVar oldSignal ()        -- Notify of change
-        writeTVar tmSignal newInnerSignal -- Put the new signal in the container
-        return res
+        return (res, newInnerSignal)
   return $ (envelope, address)
 
 -- | Read the current contents of a envelope
@@ -104,7 +107,7 @@ sendIO m v = atomically $ send m v
 -- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
 send :: Address a -> a -> STM Bool
-send (Address sendF) = sendF
+send (Address sendF) new = fst <$> sendF new
 
 -- | Watch the envelope in a thread. This is the only thread that
 -- can watch the envelope. This never ends
@@ -129,13 +132,34 @@ waitForChange (STMEnvelope notifyContainer _) = do
   notifyTMVars <- atomically $ sequence notifyContainer  :: IO [TMVar ()]
   atomically $ readOne (readTMVar <$> notifyTMVars)
 
+
+getHasChanged :: STMEnvelope a -> STM (STM Bool)
+getHasChanged (STMEnvelope notifyContainer _) = do
+  notifyTMVars <- sequence notifyContainer :: STM [TMVar ()]
+  return $ or <$> traverse isEmptyTMVar notifyTMVars
+
 -- | fold across a value each time the envelope is updated
 foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> (b -> a -> IO b)  -- ^ fold like function
              -> b                 -- ^ Initial value
              -> IO ()
-foldOnChange e@(STMEnvelope _ v) fld i = do
-  _ <- waitForChange e
-  v' <- atomically v -- wait for the lock and then read the value
-  i' <- fld i v'
-  foldOnChange e fld i'
+foldOnChange e@(STMEnvelope _ v) fld i = go
+  where go = do
+              _ <- waitForChange e
+              stmHasChanged <- atomically $ getHasChanged e
+              v' <- atomically v -- wait for the lock and then read the value
+              i' <- fld i v'
+              hasChanged <- atomically stmHasChanged
+              newI <- if hasChanged
+                then Just <$> go' i'
+                else return Nothing
+              foldOnChange e fld $ fromMaybe i' newI
+        go' new = do
+                    stmHasChanged <- atomically $  getHasChanged e
+                    v' <- atomically v -- wait for the lock and then read the value
+                    i' <- fld new v'
+                    hasChanged <- atomically stmHasChanged
+                    newI <- if hasChanged
+                      then Just <$> go' i'
+                      else return Nothing
+                    return $ fromMaybe i' newI

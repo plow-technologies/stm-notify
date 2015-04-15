@@ -5,6 +5,7 @@ module Control.Concurrent.STM.Message (
 , runMessages
 , recvMessage
 , sendMessage
+, modifyMailbox
 ) where
 
 import           Control.Concurrent.STM
@@ -15,7 +16,6 @@ import           Control.Monad
 import           Data.Monoid
 import           Data.Maybe
 import           Control.Concurrent.STM.Notify
-import Control.Monad.Trans (MonadIO(..))
 
 
 -- | A restricted monad for only doing non-blocking
@@ -29,6 +29,10 @@ runMessages = unMessage
 recvMessage :: STMEnvelope a -> Message a
 recvMessage = Message . recvIO
 
-sendMessage :: STMAddress a -> Message Bool
-sendMessage = Message . sendIO
+sendMessage :: Address a -> a -> Message Bool
+sendMessage addr m = Message $ sendIO addr m
 
+modifyMailbox :: STMMailbox a -> (a -> b -> a) -> b -> Message Bool
+modifyMailbox (env, addr) f val = do
+  tg <- recvMessage env
+  sendMessage addr $ f tg val
