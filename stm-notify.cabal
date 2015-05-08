@@ -1,10 +1,5 @@
 Name:                   stm-notify
-<<<<<<< HEAD
 Version:                0.0.2
-=======
-Version:                0.0.0
->>>>>>> parent of 27058c4... Added a simple restricted monad to do non-blocking message passing
-Author:                 Kevin Cotrone <kevincotrone@gmail.com>
 Maintainer:             Kevin Cotrone <kevincotrone@gmail.com>
 License:                BSD3
 License-File:           LICENSE
@@ -18,6 +13,7 @@ Library
   HS-Source-Dirs:       src
   GHC-Options:          -Wall
   Exposed-Modules:      Control.Concurrent.STM.Notify
+                        Control.Concurrent.STM.Message
   Other-Modules:        Control.Concurrent.STM.Notify.Internal
   Build-Depends:        base >= 4 && < 5
                       , stm

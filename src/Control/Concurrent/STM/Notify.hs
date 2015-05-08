@@ -1,6 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 module Control.Concurrent.STM.Notify (
-    STMEnvelope
+    STMEnvelope(..)
   , Address
   , spawnIO
   , spawn
@@ -14,19 +14,22 @@ module Control.Concurrent.STM.Notify (
   , STMMailbox
 )where
 
-import Prelude hiding (sequence)
 import           Control.Concurrent.STM
+import           Prelude                  hiding (sequence)
 
 import           Control.Applicative
 import           Control.Concurrent.Async
-import           Control.Monad hiding (sequence)
+import           Control.Monad            hiding (sequence)
+import           Data.Maybe
 import           Data.Monoid
-import Data.Maybe
-import Data.Traversable
+import           Data.Traversable
+
+
+type STMMailbox a = (STMEnvelope a, Address a)
 
 data STMEnvelope a = STMEnvelope {
   _stmEnvelopeTMvar :: [STM (TMVar ())]    -- ^ Action to read and wait for the current status
-, stmEnvelopeVal    :: STM a           -- ^ Actualy value of the 
+, stmEnvelopeVal    :: STM a           -- ^ Actualy value of the
 }
 
 
@@ -50,7 +53,7 @@ instance Functor STMEnvelope where
 
 instance Applicative STMEnvelope where
   pure r = STMEnvelope empty (return r)
-  (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)  
+  (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)
 
 instance Monad STMEnvelope where
   return r = STMEnvelope empty (return r)
@@ -137,27 +140,38 @@ getHasChanged (STMEnvelope notifyContainer _) = do
   return $ or <$> traverse isEmptyTMVar notifyTMVars
 
 -- | fold across a value each time the envelope is updated
+-- foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
+--              -> (b -> a -> IO b)  -- ^ fold like function
+--              -> b                 -- ^ Initial value
+--              -> IO ()
+-- foldOnChange e@(STMEnvelope _ v) fld i = go
+--   where go = do
+--               _ <- waitForChange e
+--               stmHasChanged <- atomically $ getHasChanged e
+--               v' <- atomically v -- wait for the lock and then read the value
+--               i' <- fld i v'
+--               hasChanged <- atomically stmHasChanged
+--               newI <- if hasChanged
+--                 then Just <$> go' i'
+--                 else return Nothing
+--               foldOnChange e fld $ fromMaybe i' newI
+--         go' new = do
+--                     stmHasChanged <- atomically $  getHasChanged e
+--                     v' <- atomically v -- wait for the lock and then read the value
+--                     i' <- fld new v'
+--                     hasChanged <- atomically stmHasChanged
+--                     newI <- if hasChanged
+--                       then Just <$> go' i'
+--                       else return Nothing
+--                     return $ fromMaybe i' newI
+
+-- | fold across a value each time the envelope is updated
 foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> (b -> a -> IO b)  -- ^ fold like function
              -> b                 -- ^ Initial value
              -> IO ()
-foldOnChange e@(STMEnvelope _ v) fld i = go
-  where go = do
-              _ <- waitForChange e
-              stmHasChanged <- atomically $ getHasChanged e
-              v' <- atomically v -- wait for the lock and then read the value
-              i' <- fld i v'
-              hasChanged <- atomically stmHasChanged
-              newI <- if hasChanged
-                then Just <$> go' i'
-                else return Nothing
-              foldOnChange e fld $ fromMaybe i' newI
-        go' new = do
-                    stmHasChanged <- atomically $  getHasChanged e
-                    v' <- atomically v -- wait for the lock and then read the value
-                    i' <- fld new v'
-                    hasChanged <- atomically stmHasChanged
-                    newI <- if hasChanged
-                      then Just <$> go' i'
-                      else return Nothing
-                    return $ fromMaybe i' newI
+foldOnChange e@(STMEnvelope _ v) fld i = do
+  _ <- waitForChange e
+  v' <- atomically v -- wait for the lock and then read the value
+  i' <- fld i v'
+  foldOnChange e fld i'
