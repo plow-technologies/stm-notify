@@ -1,6 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 module Control.Concurrent.STM.Notify (
-    STMEnvelope(..)
+    STMEnvelope
   , Address
   , spawnIO
   , spawn
