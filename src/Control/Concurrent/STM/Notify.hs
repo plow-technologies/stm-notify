@@ -12,56 +12,58 @@ module Control.Concurrent.STM.Notify (
   , onChange
   , foldOnChange
   , STMMailbox
+  , notify
 )where
 
 import           Control.Concurrent.STM
-import           Prelude                  hiding (sequence)
+import           Prelude                  hiding (sequence, mapM)
 
 import           Control.Applicative
 import           Control.Concurrent.Async
-import           Control.Monad            hiding (sequence)
-import           Data.Maybe
+import           Control.Monad            hiding (sequence, mapM)
 import           Data.Monoid
-import           Data.Traversable
+import Control.Arrow
 
 
 type STMMailbox a = (STMEnvelope a, Address a)
 
 data STMEnvelope a = STMEnvelope {
-  _stmEnvelopeTMvar :: [STM (TMVar ())]    -- ^ Action to read and wait for the current status
-, stmEnvelopeVal    :: STM a           -- ^ Actualy value of the
+  stmEnvelopeTMvar :: STM ([TMVar ()],a)   -- ^ Current list of waiting listeners and the current value
+, stmAddListener :: TMVar () -> STM ()     -- ^ Add a listener to the envelope
 }
 
 
 
-newtype Address a = Address { _unAddress :: a -> STM (Bool, TMVar ()) }
+newtype Address a = Address { _unAddress :: a -> STM () }
 
-
-readOne :: [STM a] -> STM a
-readOne xs = do
-  let xs' = map alwaysRead xs
-  processed <- catMaybes <$> sequence xs'
-  if length processed > 0
-    then return $ head processed
-    else retry
-
-alwaysRead :: STM a -> STM (Maybe a)
-alwaysRead x =  (Just <$> x) <|> return Nothing
 
 instance Functor STMEnvelope where
-  fmap f (STMEnvelope n v) = STMEnvelope n (f <$> v)
+  fmap f (STMEnvelope stmVal addListener) = STMEnvelope newStmVal newAddListener
+    where newAddListener = addListener -- Keep the same listener
+          newStmVal = (fmap f) <$> stmVal -- Apply f to the current value (second argument of the tuple)
 
 instance Applicative STMEnvelope where
-  pure r = STMEnvelope empty (return r)
-  (STMEnvelope n f) <*> (STMEnvelope n2 x) = STMEnvelope (n <|> n2) (f <*> x)
+  pure r = STMEnvelope (return ([], r)) (const $ return ()) -- Empty list of listeners and a function that doesn't add anything
+                                                            -- Because there is no way to modify this value by default
+  (STMEnvelope env1 addListener1) <*> (STMEnvelope env2 addListener2) = STMEnvelope newStmVal newAddListener
+    where newStmVal = (\(fList,f) (valList, val) -> (fList ++ valList, f val)) <$> env1 <*> env2 -- Apply the function to the value
+          newAddListener t = addListener1 t >> addListener2 t -- Use both listeners to allow for listening to multiple changes
+
+
+        
 
 instance Monad STMEnvelope where
-  return r = STMEnvelope empty (return r)
-  (STMEnvelope n v) >>= f = STMEnvelope n $ join $ (stmEnvelopeVal <$> f) <$> v
-
-instance (Monoid a) => Monoid (STMEnvelope a) where
-  mappend (STMEnvelope n1 v1) (STMEnvelope n2 v2) = STMEnvelope (n1 <|> n2) ((<>) <$> v1 <*> v2)
-  mempty = STMEnvelope empty (return mempty)
+  return r = STMEnvelope (return $ ([], r)) (const $ return ())
+  (STMEnvelope stmVal addListener) >>= f = STMEnvelope stmNewVal newAddListener
+    where stmNewVal = fst <$> updateFcnVal
+          newAddListener = fixAddFunc $ snd <$> updateFcnVal
+          updateFcnVal = do
+            (listeners, currentVal) <- stmVal
+            let (STMEnvelope stmRes addListener') = f currentVal
+                add t = addListener' t >> addListener t
+            (listeners', newVal) <- stmRes
+            return (((listeners' ++ listeners), newVal), add)
+          fixAddFunc func tm =  ($ tm) =<< func
 
 -- | Spawn a new envelope and an address to send new data to
 spawnIO :: a -> IO (STMEnvelope a, Address a)
@@ -69,109 +71,73 @@ spawnIO = atomically . spawn
 
 
 -- | Spawn a new envelope and an address to send new data to
--- spawn :: a -> STM (STMEnvelope a, Address a)
--- spawn val = do
---   tValue <- newTVar val
---   innerSignal <- newEmptyTMVar :: STM (TMVar ())
---   tmSignal <- newTVar innerSignal :: STM (TVar (TMVar ()))
---   return (STMEnvelope (readTVar tmSignal) (readTVar tValue), Address (\a -> signal (readTVar tmSignal) >> tryPutTMVar signal ()))
-
 spawn :: a -> STM (STMEnvelope a, Address a)
 spawn val = do
-  tValue <- newTVar val
-  innerSignal <- newEmptyTMVar :: STM (TMVar ())
-  tmSignal <- newTVar innerSignal :: STM (TVar (TMVar ()))
-  let signalContainer = readTVar tmSignal
-      envelope = STMEnvelope [signalContainer] (readTVar tValue)
-      address = Address $ \a -> do
-        oldSignal <- signalContainer    -- Old place to notify of changes
-        newInnerSignal <- newEmptyTMVar -- new method of signalling
-        writeTVar tValue a
-        writeTVar tmSignal newInnerSignal     -- Put the new signal in the container (done before notifying so that the new process can get the current signal)
-        res <- tryPutTMVar oldSignal ()        -- Notify of change
-        return (res, newInnerSignal)
-  return $ (envelope, address)
+  tValue <- newTMVar ([],val)                                -- Contents with no listeners
+  let envelope = STMEnvelope (readTMVar tValue) addListener  -- read the current value and an add function
+      addListener listener = do
+        (listeners, a) <- takeTMVar tValue                   -- Get the list of listeners to add
+        putTMVar tValue (listener:listeners, a)              -- append the new listener
+      address = Address $ \newVal -> do
+        (listeners,_) <- takeTMVar tValue                    -- Find the listeners
+        putTMVar tValue $ ([],newVal)                        -- put the new value with no listeners
+        mapM_ (flip putTMVar $ ()) listeners                 -- notify all the listeners of the change
+  return (envelope, address)
+
+
+-- | Force a notification event. This doesn't clear the listeners
+notify :: STMEnvelope a -> STM ()
+notify (STMEnvelope stmVal _) = do
+  (listeners, _) <- stmVal                                   -- Get a list of all current listeners
+  mapM_ (flip putTMVar $ ()) listeners                       -- Fill all of the tmvars
+
 
 -- | Read the current contents of a envelope
 recvIO :: STMEnvelope a -> IO a
-recvIO = atomically . stmEnvelopeVal
+recvIO = atomically . recv
 
 -- | Read the current contents of a envelope
 recv :: STMEnvelope a -> STM a
-recv = stmEnvelopeVal
+recv = (fmap snd) . stmEnvelopeTMvar
 
 -- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
-sendIO :: Address a -> a -> IO Bool
+sendIO :: Address a -> a -> IO ()
 sendIO m v = atomically $ send m v
 
 -- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
-send :: Address a -> a -> STM Bool
-send (Address sendF) new = fst <$> sendF new
+send :: Address a -> a -> STM ()
+send (Address sendF) = sendF
 
 -- | Watch the envelope in a thread. This is the only thread that
 -- can watch the envelope. This never ends
 forkOnChange :: STMEnvelope a -- ^ Envelope to watch
              -> (a -> IO b)  -- ^ Action to perform
-             -> IO (Async ()) -- ^ Resulting async value so that you can cancel
+             -> IO (Async b) -- ^ Resulting async value so that you can cancel
 forkOnChange v f = async $ onChange v f
 
 -- | Watch the envelope for changes. This never ends
 onChange :: STMEnvelope a -- ^ Envelope to watch
          -> (a -> IO b)  -- ^ Action to perform
-         -> IO ()
-onChange env@(STMEnvelope _ valueContainer) f = forever $ do
-  _ <- waitForChange env
-  value <- atomically $ valueContainer
-  _ <- f value
-  return ()
+         -> IO b
+onChange env f = forever $ waitForChange env >> (f =<< recvIO env)
 
 
 waitForChange :: STMEnvelope a -> IO ()
-waitForChange (STMEnvelope notifyContainer _) = do
-  notifyTMVars <- atomically $ sequence notifyContainer  :: IO [TMVar ()]
-  atomically $ readOne (readTMVar <$> notifyTMVars)
+waitForChange (STMEnvelope _ addListener) = do
+  x <- newEmptyTMVarIO
+  atomically $ addListener x            -- This is two seperate transactions because readTMVar will fail
+  atomically $ readTMVar x              -- Causing addListener to retry
 
 
-getHasChanged :: STMEnvelope a -> STM (STM Bool)
-getHasChanged (STMEnvelope notifyContainer _) = do
-  notifyTMVars <- sequence notifyContainer :: STM [TMVar ()]
-  return $ or <$> traverse isEmptyTMVar notifyTMVars
-
--- | fold across a value each time the envelope is updated
--- foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
---              -> (b -> a -> IO b)  -- ^ fold like function
---              -> b                 -- ^ Initial value
---              -> IO ()
--- foldOnChange e@(STMEnvelope _ v) fld i = go
---   where go = do
---               _ <- waitForChange e
---               stmHasChanged <- atomically $ getHasChanged e
---               v' <- atomically v -- wait for the lock and then read the value
---               i' <- fld i v'
---               hasChanged <- atomically stmHasChanged
---               newI <- if hasChanged
---                 then Just <$> go' i'
---                 else return Nothing
---               foldOnChange e fld $ fromMaybe i' newI
---         go' new = do
---                     stmHasChanged <- atomically $  getHasChanged e
---                     v' <- atomically v -- wait for the lock and then read the value
---                     i' <- fld new v'
---                     hasChanged <- atomically stmHasChanged
---                     newI <- if hasChanged
---                       then Just <$> go' i'
---                       else return Nothing
---                     return $ fromMaybe i' newI
-
--- | fold across a value each time the envelope is updated
+-- -- | fold across a value each time the envelope is updated
 foldOnChange :: STMEnvelope a     -- ^ Envelop to watch
              -> (b -> a -> IO b)  -- ^ fold like function
              -> b                 -- ^ Initial value
              -> IO ()
-foldOnChange e@(STMEnvelope _ v) fld i = do
-  _ <- waitForChange e
-  v' <- atomically v -- wait for the lock and then read the value
-  i' <- fld i v'
-  foldOnChange e fld i'
+foldOnChange env fld accum = do
+  _ <- waitForChange env
+  val <- recvIO env -- wait for the lock and then read the value
+  accum' <- fld accum val
+  foldOnChange env fld accum'
