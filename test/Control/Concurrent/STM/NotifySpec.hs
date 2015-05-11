@@ -24,7 +24,6 @@ specModifyingValue = do
       (env, addr) <- spawnIO 0 :: IO (STMEnvelope Int, Address Int)
       (listEnv, listAddr) <- spawnIO []
       _ <- forkOnChange env (\i -> do
-        putStrLn "Hello"
         atomically $ do
           xs <- recv listEnv
           send listAddr (xs ++ [i]))
