@@ -21,8 +21,6 @@ import           Prelude                  hiding (sequence, mapM)
 import           Control.Applicative
 import           Control.Concurrent.Async
 import           Control.Monad            hiding (sequence, mapM)
-import           Data.Monoid
-import Control.Arrow
 
 
 type STMMailbox a = (STMEnvelope a, Address a)
