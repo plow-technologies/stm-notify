@@ -85,7 +85,7 @@ spawn val = do
       address = Address $ \newVal -> do
         (listeners,_) <- takeTMVar tValue                    -- Find the listeners
         putTMVar tValue $ ([],newVal)                        -- put the new value with no listeners
-        mapM_ (flip putTMVar $ ()) listeners                 -- notify all the listeners of the change
+        mapM_ (flip tryPutTMVar $ ()) listeners                 -- notify all the listeners of the change
   return (envelope, address)
 
 
@@ -93,7 +93,7 @@ spawn val = do
 notify :: STMEnvelope a -> STM ()
 notify (STMEnvelope stmVal _) = do
   (listeners, _) <- stmVal                                   -- Get a list of all current listeners
-  mapM_ (flip putTMVar $ ()) listeners                       -- Fill all of the tmvars
+  mapM_ (flip tryPutTMVar $ ()) listeners                       -- Fill all of the tmvars
 
 
 -- | Read the current contents of a envelope
