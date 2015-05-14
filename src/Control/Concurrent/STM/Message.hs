@@ -6,15 +6,11 @@ module Control.Concurrent.STM.Message (
 , recvMessage
 , sendMessage
 , modifyMailbox
+, debug
 ) where
 
-import           Control.Concurrent.STM
 
 import           Control.Applicative
-import           Control.Concurrent.Async
-import           Control.Monad
-import           Data.Monoid
-import           Data.Maybe
 import           Control.Concurrent.STM.Notify
 
 
@@ -36,3 +32,6 @@ modifyMailbox :: STMMailbox a -> (a -> a)-> Message ()
 modifyMailbox (env, addr) f = do
   tg <- recvMessage env
   sendMessage addr $ f tg
+
+debug :: String -> Message ()
+debug = Message . putStrLn
