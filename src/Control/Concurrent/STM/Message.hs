@@ -32,7 +32,7 @@ recvMessage = Message . recvIO
 sendMessage :: Address a -> a -> Message ()
 sendMessage addr m = Message $ sendIO addr m
 
-modifyMailbox :: STMMailbox a -> (a -> b -> a) -> b -> Message ()
-modifyMailbox (env, addr) f val = do
+modifyMailbox :: STMMailbox a -> (a -> a)-> Message ()
+modifyMailbox (env, addr) f = do
   tg <- recvMessage env
-  sendMessage addr $ f tg val
+  sendMessage addr $ f tg
