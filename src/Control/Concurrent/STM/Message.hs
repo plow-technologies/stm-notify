@@ -7,11 +7,14 @@ module Control.Concurrent.STM.Message (
 , sendMessage
 , modifyMailbox
 , debug
+, unsafeForkIO
 ) where
 
 
 import           Control.Applicative
+import           Control.Concurrent
 import           Control.Concurrent.STM.Notify
+import           Control.Monad
 
 
 -- | A restricted monad for only doing non-blocking
@@ -35,3 +38,6 @@ modifyMailbox (env, addr) f = do
 
 debug :: String -> Message ()
 debug = Message . putStrLn
+
+unsafeForkIO :: IO () -> Message ()
+unsafeForkIO = Message . void . forkIO
