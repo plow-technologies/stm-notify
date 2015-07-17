@@ -1,5 +1,5 @@
 Name:                   stm-notify
-Version:                0.0.4
+Version:                0.1.0
 Maintainer:             Kevin Cotrone <kevincotrone@gmail.com>
 License:                BSD3
 License-File:           LICENSE
@@ -13,7 +13,6 @@ Library
   HS-Source-Dirs:       src
   GHC-Options:          -Wall
   Exposed-Modules:      Control.Concurrent.STM.Notify
-                        Control.Concurrent.STM.Message
   Other-Modules:        Control.Concurrent.STM.Notify.Internal
   Build-Depends:        base >= 4 && < 5
                       , stm
