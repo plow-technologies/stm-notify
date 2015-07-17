@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 module Control.Concurrent.STM.Notify (
     STMEnvelope
@@ -73,6 +74,9 @@ instance Monad STMEnvelope where
 spawnIO :: a -> IO (STMEnvelope a, Address a)
 spawnIO = atomically . spawn
 
+-- | Spawn a new envelope and address inside of an envelope computation
+spawnEnvelope :: a -> STMEnvelope (STMEnvelope a, Address a)
+spawnEnvelope x = STMEnvelope (([],) <$> spawn x) (const $ return ())
 
 -- | Spawn a new envelope and an address to send new data to
 spawn :: a -> STM (STMEnvelope a, Address a)
