@@ -19,34 +19,35 @@ module Control.Concurrent.STM.Notify (
   , foldOnChangeWith
 )where
 
-import           Control.Concurrent.STM
-import           Prelude                  hiding (sequence, mapM)
-
 import           Control.Applicative
 import           Control.Concurrent.Async
-import           Control.Monad            hiding (sequence, mapM)
+import           Control.Concurrent.STM
+import           Control.Monad            hiding (mapM, sequence)
+import           Prelude                  hiding (mapM, sequence)
 
 
 type STMMailbox a = (STMEnvelope a, Address a)
 
 data STMEnvelope a = STMEnvelope {
-  stmEnvelopeTMvar :: STM ([TMVar ()],a)   -- ^ Current list of waiting listeners and the current value
-, stmAddListener :: TMVar () -> STM ()     -- ^ Add a listener to the envelope
+  stmEnvelopeTMvar :: STM ([TMVar ()],a) -- ^ Current list of waiting listeners and the current value
+, stmAddListener   :: TMVar () -> STM () -- ^ Add a listener to the envelope
 }
 
 
-
+-- A wrapper to send an item to its paried container
 newtype Address a = Address { _unAddress :: a -> STM () }
 
 
 instance Functor STMEnvelope where
   fmap f (STMEnvelope stmVal insertListener) = STMEnvelope newStmVal newInsertListener
     where newInsertListener = insertListener -- Keep the same listener
-          newStmVal = (fmap f) <$> stmVal -- Apply f to the current value (second argument of the tuple)
+          newStmVal = fmap f <$> stmVal -- Apply f to the current value
+                                          -- (<$> over STM and fmap over the tuple)
 
 instance Applicative STMEnvelope where
-  pure r = STMEnvelope (return ([], r)) (const $ return ()) -- Empty list of listeners and a function that doesn't add anything
-                                                            -- Because there is no way to modify this value by default
+  pure r = STMEnvelope (return ([], r)) (const $ return ())
+  -- Empty list of listeners and a function that doesn't add anything
+  -- Because there is no way to modify this value by default
   (STMEnvelope env1 insertListener1) <*> (STMEnvelope env2 insertListener2) = STMEnvelope newStmVal newAddListener
     where newStmVal = (\(fList,f) (valList, val) -> (fList ++ valList, f val)) <$> env1 <*> env2 -- Apply the function to the value
           newAddListener t = insertListener1 t >> insertListener2 t -- Use both listeners to allow for listening to multiple changes
@@ -57,7 +58,7 @@ instance Alternative STMEnvelope where
   (STMEnvelope val listener) <|> (STMEnvelope val' listener') = STMEnvelope (val <|> val') (\t -> listener t >> listener' t)
 
 instance Monad STMEnvelope where
-  return r = STMEnvelope (return $ ([], r)) (const $ return ())
+  return r = STMEnvelope (return ([], r)) (const $ return ())
   (STMEnvelope stmVal insertListener) >>= f = STMEnvelope stmNewVal newInsertListener
     where stmNewVal = fst <$> updateFcnVal
           newInsertListener = fixAddFunc $ snd <$> updateFcnVal
@@ -66,7 +67,7 @@ instance Monad STMEnvelope where
             let (STMEnvelope stmRes insertListener') = f currentVal
                 add t = insertListener' t >> insertListener t
             (listeners', newVal) <- stmRes
-            return (((listeners' ++ listeners), newVal), add)
+            return ((listeners' ++ listeners, newVal), add)
           fixAddFunc func tm =  ($ tm) =<< func
 
 -- | Spawn a new envelope and an address to send new data to
@@ -84,8 +85,8 @@ spawn val = do
         putTMVar tValue (listener:listeners, a)              -- append the new listener
       address = Address $ \newVal -> do
         (listeners,_) <- takeTMVar tValue                    -- Find the listeners
-        putTMVar tValue $ ([],newVal)                        -- put the new value with no listeners
-        mapM_ (flip tryPutTMVar $ ()) listeners                 -- notify all the listeners of the change
+        putTMVar tValue ([],newVal)                        -- put the new value with no listeners
+        mapM_ (`tryPutTMVar`  ()) listeners                 -- notify all the listeners of the change
   return (envelope, address)
 
 
@@ -93,7 +94,7 @@ spawn val = do
 notify :: STMEnvelope a -> STM ()
 notify (STMEnvelope stmVal _) = do
   (listeners, _) <- stmVal                                   -- Get a list of all current listeners
-  mapM_ (flip tryPutTMVar $ ()) listeners                       -- Fill all of the tmvars
+  mapM_ (`tryPutTMVar` ()) listeners                       -- Fill all of the tmvars
 
 
 -- | Read the current contents of a envelope
@@ -102,7 +103,7 @@ recvIO = atomically . recv
 
 -- | Read the current contents of a envelope
 recv :: STMEnvelope a -> STM a
-recv = (fmap snd) . stmEnvelopeTMvar
+recv = fmap snd . stmEnvelopeTMvar
 
 -- | Update the contents of a envelope for a specific address
 -- and notify the watching thread
@@ -128,6 +129,7 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
 onChange env f = forever $ waitForChange env >> (f =<< recvIO env)
 
 
+
 waitForChange :: STMEnvelope a -> IO ()
 waitForChange (STMEnvelope _ insertListener) = do
   x <- newEmptyTMVarIO
@@ -143,6 +145,7 @@ waitForChanges getChildren getEnv start = do
               let insertListener = stmAddListener $ getEnv start
               atomically $ insertListener listener
               mapM_ (go listener getCh env) $ getCh val
+
 
 
 -- -- | fold across a value each time the envelope is updated
@@ -169,17 +172,18 @@ foldOnChangeWith waitFunc env fld accum = do
 watchOn :: (a -> STMEnvelope [a]) -> STMEnvelope a -> IO ()
 watchOn f stmVal = do
   listener <- newEmptyTMVarIO
-  atomically $ stmAddListener stmVal $ listener
+  atomically $ stmAddListener stmVal listener
   currentVal <- recvIO stmVal
   let envCh = f currentVal
   children <- recvIO envCh
   mapM_ (go listener f) children
   atomically $ readTMVar listener
   where go listener func val = do
-          let envChildren = func val 
-          atomically $ stmAddListener envChildren $ listener
+          let envChildren = func val
+          atomically $ stmAddListener envChildren listener
           ch <- recvIO envChildren
           mapM_ (go listener func) ch
 
 addListener :: STMEnvelope a -> TMVar () -> STM ()
 addListener = stmAddListener
+
