@@ -5,6 +5,7 @@ module Control.Concurrent.STM.Notify (
   , Address
   , spawnIO
   , spawn
+  , spawnEnvelope
   , recvIO
   , recv
   , sendIO
@@ -78,7 +79,10 @@ spawnIO = atomically . spawn
 
 -- | Spawn a new envelope and address inside of an envelope computation
 spawnEnvelope :: a -> STMEnvelope (STMEnvelope a, Address a)
-spawnEnvelope x = STMEnvelope (([],) <$> spawn x) (const $ return ())
+spawnEnvelope x = STMEnvelope (([],) <$> spawned) addListener
+  where spawned = spawn x
+        addListener = fixStm (stmAddListener . fst <$> spawned)
+        fixStm f x = ($ x) =<< f
 
 -- | Spawn a new envelope and an address to send new data to
 spawn :: a -> STM (STMEnvelope a, Address a)
