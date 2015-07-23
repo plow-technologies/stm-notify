@@ -1,5 +1,5 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE TupleSections     #-}
 module Control.Concurrent.STM.Notify (
     STMEnvelope
   , Address
@@ -24,6 +24,7 @@ import           Control.Applicative
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM
 import           Control.Monad            hiding (mapM, sequence)
+import           Data.Traversable         (traverse)
 import           Prelude                  hiding (mapM, sequence)
 
 
@@ -132,7 +133,26 @@ onChange :: STMEnvelope a -- ^ Envelope to watch
          -> IO b
 onChange env f = forever $ waitForChange env >> (f =<< recvIO env)
 
+onChangeWith :: (a -> [STMEnvelope a])
+             -> STMEnvelope a
+             -> (a -> IO b)
+             -> IO ()
+onChangeWith children env f = void . forever $ do
+  watch <- newEmptyTMVarIO
+  go children watch env
+  atomically $ readTMVar watch
+  _ <- f =<< recvIO env
+  return ()
+    where go getChildren watch env = do
+            current <- recvIO env
+            atomically $ stmAddListener env watch
+            mapM_ (go getChildren watch) $ getChildren current
 
+forkOnChangeWith :: (a -> [STMEnvelope a])
+                 -> STMEnvelope a
+                 -> (a -> IO b)
+                 -> IO (Async ())
+forkOnChangeWith getC env f = async $ onChangeWith getC env f
 
 waitForChange :: STMEnvelope a -> IO ()
 waitForChange (STMEnvelope _ insertListener) = do
