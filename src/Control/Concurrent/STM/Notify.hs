@@ -71,8 +71,17 @@ instance Monad Envelope where
 
 -- | Spawn a new envelope and an address to send new data to
 spawnIO :: a -> IO (Envelope a, Address a)
-spawnIO = undefined
-
+spawnIO val = do
+  container <- newMVar ([], val)
+  let envelope = Envelope (readMVar container) insertListener
+      insertListener listener = do
+        (listeners, cVal) <- takeMVar container
+        putMVar container (listener:listeners, cVal)
+      address = Address $ \newVal -> do
+        (listeners,_) <- takeMVar container
+        putMVar container ([], newVal)
+        mapM_ (`tryPutMVar` ()) listeners
+  return (envelope, address)
 -- | Spawn a new envelope and address inside of an envelope computation
 -- spawnEnvelope :: a -> Envelope (Envelope a, Address a)
 -- spawnEnvelope x = Envelope (([],) <$> spawned) addListener
@@ -104,7 +113,7 @@ notify (Envelope readCurrentValue _) = do
 
 -- | Read the current contents of a envelope
 recvIO :: Envelope a -> IO a
-recvIO = undefined
+recvIO (Envelope readValue _) = snd <$> readValue
 
 -- | Read the current contents of a envelope
 -- recv :: Envelope a -> STM a
