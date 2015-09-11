@@ -8,6 +8,11 @@ License-File:           LICENSE
 Cabal-Version:          >= 1.10
 Build-Type:             Simple
 
+flag build-examples
+  description: build the example programs
+  default: False
+  manual: True
+
 Library
   Default-Language:     Haskell2010
   HS-Source-Dirs:       src
@@ -30,6 +35,20 @@ Test-Suite spec
                       , hspec
                       , stm
                       , async
+
+executable example
+  if !flag(build-examples)
+      buildable: False
+  Main-Is:           Example.hs
+  Default-Language:  Haskell2010
+  hs-source-dirs:    examples
+  Build-Depends:     base        >= 4 && < 5
+                   , stm-notify
+                   , stm
+                   , async
+                   , containers
+  ghcjs-Options: -Wall
+
 
 Source-Repository head
   Type:                 git
